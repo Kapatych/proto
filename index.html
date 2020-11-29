@@ -7,21 +7,488 @@
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/5.0.0-alpha1/css/bootstrap.min.css"
         integrity="sha384-r4NyP46KrjDleawBgD5tp8Y7UzmLA05oM1iAEQ17CSuDqnUK2+k9luXQOfXJCJ4I" crossorigin="anonymous">
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.min.js"></script>
   <title>Document</title>
 </head>
 <body>
 <div id="app">
+  <template v-if="startGame">
+    <header class="header container">
+      <h1 class="text-bold text-white logo">KNBattle</h1>
+      <div class="d-flex align-items-center">
+        <span v-if="!currentRole" class="text-white player-name">{{ subscriber.name }}</span>
+        <span v-if="currentRole" class="text-white player-name">{{ streamer.name }}</span>
+        <div v-if="!currentRole" class="pl-4">
+          <img v-for="lost in (3 - subscriber.lives)" src="./img/heart.svg" class="mx-1" width="30" height="30"
+               alt="lives lost">
+          <img v-for="live in subscriber.lives" src="./img/heart-fill.svg" class="mx-1" width="30" height="30"
+               alt="lives balance">
+        </div>
+      </div>
+    </header>
+    <main class="battle container">
+      <div class="battle__heading">
+        <h2 class="text-center my-3">{{ streamer.name }} VS Подписчики ({{ subscribers.count }})</h2>
+        <h3 class="text-center">Раунд {{ currentRound }}</h3>
+        <h4 class="text-center">{{ currentStage }} / {{ roundStages.length }}</h4>
+      </div>
+      <component class="battle__content"
+                 :is="currentComponent"
+                 :streamer="streamer"
+                 :subscriber="subscriber"
+                 :timeout="stageTimeout"
+                 :subscribers="subscribers"
+                 :current-round="currentRound"
+                 @subscriber-made-choice="subscriberChoiceHandler"
+                 @streamer-made-choice="streamerChoiceHandler"
+                 @time-left="nextStageHandler"
+                 @lost-live="lostLiveHandler"
+                 @next-round="nextRoundHandler"
+                 @rebuy="rebuyHandler"
+                 @endgame="endgameHandler"
+                 @subscribers-left="subscribersLeftHandler"></component>
 
+
+    </main>
+  </template>
+  <template v-else>
+    <header class="header container">
+      <h1 class="text-bold text-white logo">KNBattle</h1>
+    </header>
+    <main class="container preview">
+      <div>
+        <p class="h1 text-center">Кто вы?</p>
+        <button type="button" value="1" class="btn btn-primary" @click="startGameHandler">Стриммер</button>
+        <button type="button" value="0" class="btn btn-secondary" @click="startGameHandler">Подписчик</button>
+      </div>
+    </main>
+  </template>
 </div>
+
+<script type="text/x-template" id="timer-template">
+  <div class="timer" :class="danger && 'timer--danger'">{{ time | format }}</div>
+</script>
+
+<script type="text/x-template" id="spinner-template">
+  <img src="img/spinner.svg" :width="size" :height="size" alt="">
+</script>
+
+<script type="text/x-template" id="action-alert-template">
+  <div class="action-alert">
+
+    <p class="h1 my-3">{{ text }}</p>
+    <timer :time="timeout"></timer>
+  </div>
+</script>
+
+<script type="text/x-template" id="button-bar-template">
+  <div class="button-bar">
+    <button type="button"
+            v-for="item in ['stone', 'scissors', 'paper']"
+            :key="item"
+            :value="item"
+            class="button-bar__item btn"
+            @click="clickHandler">
+      <choice-icon :name="item" size="100"></choice-icon>
+    </button>
+  </div>
+</script>
+
+<script type="text/x-template" id="choice-icon-template">
+  <span class="choice-icon"
+        :class="`choice-icon--${name}`"
+        :style="{ width: size + 'px', height: size + 'px' }"></span>
+</script>
+
+<script type="text/x-template" id="subscriber-choice-template">
+  <section class="subscriber-choice container">
+    <action-alert :timeout="timeout" text="Сделайте свой выбор"></action-alert>
+    <button-bar :clickHandler="clickHandler"></button-bar>
+  </section>
+</script>
+
+<script type="text/x-template" id="subscriber-wait-template">
+  <section class="subscriber-choice container">
+    <action-alert :timeout="timeout" text="Ожидайте хода стримера"></action-alert>
+  </section>
+</script>
+
+<script type="text/x-template" id="subscriber-result-template">
+  <section class="subscriber-result container">
+    <div class="result">
+      <p v-if="subscriber.battleResult === -1" class="h1 text-center mb-4">Вы проиграли</p>
+      <p v-if="subscriber.battleResult === 0" class="h1 text-center mb-4">Ничья</p>
+      <p v-if="subscriber.battleResult === 1" class="h1 text-center mb-4">Вы выиграли</p>
+      <div class="d-flex justify-content-center">
+        <div class="w-100">
+          <div class="d-flex justify-content-center align-items-center p-3">
+            <choice-icon :name="streamer.choice" size="100"></choice-icon>
+          </div>
+          <p class="h2 text-center">{{ streamer.name }}</p>
+        </div>
+        <p class="h1 text-bold d-flex align-items-center">VS</p>
+        <div class="w-100">
+          <div class="d-flex justify-content-center align-items-center p-3">
+            <choice-icon :name="subscriber.choice" size="100"></choice-icon>
+          </div>
+          <p class="h2 text-center">{{ subscriber.name }}</p>
+        </div>
+      </div>
+    </div>
+
+    <action-alert v-if="subscriber.lives > 0" :timeout="timeout" text="Следующий раунд"></action-alert>
+
+    <div v-else class="lost-alert">
+      <button class="btn lost-alert__btn lost-alert__btn--danger" @click="$emit('endgame')">Закончить</button>
+      <timer :time="timeout"></timer>
+      <button class="btn lost-alert__btn lost-alert__btn--success" @click="$emit('rebuy')">Купить 1 жизнь</button>
+    </div>
+
+  </section>
+</script>
+
+<script type="text/x-template" id="subscriber-endgame-template">
+  <p class="h1 text-center text-bold">Спасибо за игру!</p>
+</script>
+
+<script type="text/x-template" id="streamer-wait-template">
+  <section class="streamer-wait container">
+    <action-alert :timeout="timeout" text="Ожидайте хода подписчиков"></action-alert>
+    <div class="progress">
+      <div class="progress-bar progress-bar-striped progress-bar-animated"
+           role="progressbar"
+           :style="`width: ${subscribersReadyPercent}%`"
+           :aria-valuenow="subscribersReadyPercent"
+           aria-valuemin="0"
+           :aria-valuemax="subscribers.count">
+        {{ subscribersReadyPercent }}%
+      </div>
+    </div>
+  </section>
+</script>
+
+<script type="text/x-template" id="streamer-choice-template">
+  <section class="streamer-choice container">
+    <action-alert :timeout="timeout" text="Сделайте свой выбор"></action-alert>
+
+    <div v-if="currentRound > 1" class="streamer-choice__history d-flex">
+      <div class="w-100">
+        <p class="text-center h5">Ваши предыдущие ходы</p>
+        <div class="d-flex justify-content-center align-items-center pt-2">
+          <choice-icon v-for="choice in streamer.choiceHistory" :name="choice" size="50"></choice-icon>
+        </div>
+      </div>
+      <div class="w-100">
+        <p class="text-center h5">Последний ход подписчиков</p>
+        <div class="d-flex justify-content-center align-items-center">
+          <div v-for="choice in subscribers.lastChoice" class="text-center pt-2">
+            <choice-icon :name="choice.label" size="50"></choice-icon>
+            <div class="h5 mt-2">{{ choice.count }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button-bar :clickHandler="clickHandler"></button-bar>
+  </section>
+</script>
+
+<script type="text/x-template" id="streamer-result-template">
+  <section class="streamer-result container">
+    <p class="h1 text-center mb-4">Результаты</p>
+
+    <div class="d-flex justify-content-center align-items-center">
+      <div class="w-100">
+        <div class="d-flex justify-content-center align-items-center p-2">
+          <choice-icon :name="streamer.choice" size="100"></choice-icon>
+        </div>
+        <p class="h2 text-center">{{ streamer.name }}</p>
+      </div>
+
+      <p class="h1 text-bold d-flex align-items-center">VS</p>
+
+      <div class="w-100">
+        <div class="d-flex justify-content-center">
+          <div v-for="item in subscribers.choice" :key="item.label" class="text-center">
+            <div class="py-2">
+              <choice-icon :name="item.label" size="100"></choice-icon>
+            </div>
+            <p class="h2 text-center choice__count">{{ item.count }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex">
+      <div class="w-100 text-center">
+        <p class="h1">10</p>
+        <p class="h4">Жизней отнято</p>
+      </div>
+      <div class="invisible h1 text-bold">VS</div>
+      <div class="w-100 text-center">
+        <p class="h1">15</p>
+        <p class="h4">Подписчиков осталось</p>
+      </div>
+    </div>
+
+    <action-alert :timeout="timeout" text="Следующий раунд"></action-alert>
+  </section>
+</script>
 
 
 <script>
+  const timeoutMixin = {
+    props: ['timeout'],
+    data: () => ({
+      timer: null
+    }),
+    mounted() {
+      this.timer = setTimeout(this.nextStageHandler, this.timeout)
+    },
+    beforeDestroy() {
+      clearTimeout(this.timer);
+    }
+  };
+
+  Vue.component('timer', {
+    template: '#timer-template',
+    props: ['time'],
+    data: () => ({
+      timer: null,
+      danger: false
+    }),
+    mounted() {
+      this.timer = setInterval(() => {
+        if (this.time > 0) {
+          this.time -= 1000;
+          if (this.time <= 5000) this.danger = true;
+        } else {
+          clearInterval(this.timer);
+        }
+      }, 1000)
+    },
+    filters: {
+      format: function (value) {
+        return value / 1000;
+      }
+    },
+    beforeDestroy() {
+      clearInterval(this.timer)
+    }
+  });
+
+  Vue.component('spinner', {
+    template: '#spinner-template',
+    props: ['size']
+  });
+
+  Vue.component('action-alert', {
+    template: '#action-alert-template',
+    props: ['timeout', 'text']
+  });
+
+  Vue.component('choice-icon', {
+    template: '#choice-icon-template',
+    props: ['name', 'size']
+  });
+
+  Vue.component('button-bar', {
+    template: '#button-bar-template',
+    props: ['clickHandler']
+  });
+
+  Vue.component('subscriber-choice', {
+    template: '#subscriber-choice-template',
+    inheritAttrs: false,
+    data: () => ({
+      choice: null,
+    }),
+    methods: {
+      clickHandler(event) {
+        this.choice = event.currentTarget.value;
+      },
+      nextStageHandler() {
+        this.$emit('subscriber-made-choice', this.choice)
+      }
+    },
+    mixins: [timeoutMixin]
+  });
+
+  Vue.component('subscriber-wait', {
+    template: '#subscriber-wait-template',
+    inheritAttrs: false,
+    methods: {
+      nextStageHandler() {
+        this.$emit('time-left')
+      }
+    },
+    mixins: [timeoutMixin]
+  });
+
+  Vue.component('subscriber-result', {
+    template: '#subscriber-result-template',
+    inheritAttrs: false,
+    props: ['streamer', 'subscriber'],
+    mounted() {
+      if (this.subscriber.battleResult !== 1) this.$emit('lost-live')
+    },
+    methods: {
+      nextStageHandler() {
+        if (this.subscriber.lives > 0) {
+          this.$emit('next-round')
+        } else {
+          this.$emit('endgame')
+        }
+      }
+    },
+    mixins: [timeoutMixin]
+  });
+
+  Vue.component('subscriber-endgame', {
+    template: '#subscriber-endgame-template',
+  });
+
+  Vue.component('streamer-wait', {
+    template: '#streamer-wait-template',
+    inheritAttrs: false,
+    props: ['subscribers'],
+    methods: {
+      nextStageHandler() {
+        this.$emit('time-left')
+      }
+    },
+    computed: {
+      subscribersReadyPercent() {
+        return Math.floor(this.subscribers.ready / this.subscribers.count * 100)
+      }
+    },
+    mixins: [timeoutMixin]
+  });
+
+  Vue.component('streamer-choice', {
+    template: '#streamer-choice-template',
+    inheritAttrs: false,
+    props: ['streamer', 'subscribers', 'current-round'],
+    data: () => ({
+      choice: null,
+    }),
+    methods: {
+      clickHandler(event) {
+        this.choice = event.currentTarget.value;
+      },
+      nextStageHandler() {
+        this.$emit('streamer-made-choice', this.choice)
+      }
+    },
+    mixins: [timeoutMixin]
+  });
+
+  Vue.component('streamer-result', {
+    template: '#streamer-result-template',
+    inheritAttrs: false,
+    props: ['streamer', 'subscribers', 'subscriber'],
+    mounted() {
+      this.$emit('subscribers-left')
+    },
+    methods: {
+      nextStageHandler() {
+        if (this.subscribers.count > 1) {
+          this.$emit('next-round')
+        } else {
+          this.$emit('endgame')
+        }
+      }
+    },
+    mixins: [timeoutMixin]
+  });
+
+
   let vm = new Vue({
     el: '#app',
-    data: () => ({}),
-  })
+    data: () => ({
+      startGame: false,
+      currentRound: 1,
+      playerRoles: ['subscriber', 'streamer'],
+      currentRole: 0,
+      roundStages: ['choice', 'wait', 'result'],
+      currentStage: 1,
+      stageTimeout: 10000,
+      endgame: false,
+      streamer: {
+        name: 'Вася Пупкин',
+        choice: ['stone', 'scissors', 'paper'][Math.floor(Math.random() * 3)],
+        choiceHistory: [],
+      },
+      subscriber: {
+        name: 'Ваня Иванов',
+        lives: 1,
+        choice: 'paper',
+        battleResult: -1,
+      },
+      subscribers: {
+        count: 20,
+        ready: 5,
+        choice: [
+          {label: 'stone', count: 1},
+          {label: 'scissors', count: 2},
+          {label: 'paper', count: 3},
+        ],
+        lastChoice: [
+          {label: 'stone', count: 5},
+          {label: 'scissors', count: 5},
+          {label: 'paper', count: 5},
+        ]
+      },
+    }),
+    computed: {
+      currentComponent: function () {
+        if (this.endgame) return 'subscriber-endgame';
+        let roundStages = this.currentRole ? ['wait', 'choice', 'result'] : this.roundStages;
+        return `${this.playerRoles[this.currentRole]}-${roundStages[this.currentStage - 1]}`
+      },
+    },
+    methods: {
+      startGameHandler(event) {
+        this.currentRole = +event.target.value;
+        this.startGame = true
+      },
+      nextStageHandler() {
+        if (this.currentStage < this.roundStages.length) {
+          this.currentStage += 1
+        }
+      },
+      nextRoundHandler() {
+        this.currentRound += 1;
+        this.currentStage = 1;
+        this.subscribers.lastChoice = this.subscribers.choice;
+      },
+      subscriberChoiceHandler(value) {
+        this.nextStageHandler();
+        this.subscriber.choice = value || this.subscriber.choice;
+        this.subscribers.choice.map(item => (item.label === value) && item.count++);
+      },
+      streamerChoiceHandler(value) {
+        this.nextStageHandler();
+        this.streamer.choice = value;
+        this.streamer.choiceHistory.push(value);
+      },
+      lostLiveHandler() {
+        if (this.subscriber.lives > 0) {
+          this.subscriber.lives -= 1
+        }
+      },
+      rebuyHandler() {
+        this.subscriber.lives += 1
+      },
+      endgameHandler() {
+        this.endgame = true;
+      },
+      subscribersLeftHandler() {
+        this.subscribers.count -= 5;
+      }
+    }
+  });
 </script>
 </body>
 </html>
